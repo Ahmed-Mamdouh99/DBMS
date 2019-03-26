@@ -14,7 +14,7 @@ public class DBAppTest {
   public static void main(String[] args) {
     // Clear data directory
     File dataFile = new File("data/");
-    if (!deleteDirectories(dataFile)) {
+    if (dataFile.exists() && !deleteDirectories(dataFile)) {
       System.err.println("Could not clear data directory");
       return;
     }
@@ -26,7 +26,12 @@ public class DBAppTest {
   }
 
   private static void test() {
-    DBApp app = new DBApp();
+    DBApp app = null;
+    try {
+      app = new DBApp();
+    } catch (DBAppException e) {
+      e.printStackTrace();
+    }
     // Test table creation
     int tableNumber = testTableCreation(app, 1);
     if (tableNumber == -1) {

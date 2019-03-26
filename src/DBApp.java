@@ -1,10 +1,21 @@
+import java.io.File;
 import java.util.Hashtable;
 import java.util.Iterator;
 
 public class DBApp {
 
-  public void init() {
+  public DBApp() throws DBAppException {
+    init();
+  }
 
+  public void init() throws DBAppException {
+    // Make sure that the data directory exists
+    File dataFile = new File("data/");
+    if(!dataFile.exists()) {
+      if(!dataFile.mkdir()){
+        throw new DBAppException("Could not create data directory");
+      }
+    }
   }
 
   public void createTable(String tableName, String keyColumn, Hashtable<String, String> columns) throws DBAppException {
