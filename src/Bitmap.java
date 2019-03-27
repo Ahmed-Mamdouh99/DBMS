@@ -8,17 +8,21 @@ public class Bitmap<T extends Comparable<T>> implements Comparable<Bitmap<T>>, S
   Bitmap(T value, int pageIndex, T[] tablePage, int[] sizes) {
     this.value = value;
     bitmap = new ArrayList<>();
-    for (int size : sizes) {
+    for (int i = 0; i < sizes.length; i++) {
+      int size = sizes[i];
       ArrayList<Boolean> tmp = new ArrayList<>();
-      for (int i = 0; i < size; i++) {
-        tmp.add(false);
+      if(i != pageIndex) {
+        for (int j = 0; j < size; j++) {
+          tmp.add(false);
+        }
+      } else {
+        if(size != tablePage.length){
+          for(int j=0; j<size; j++) {
+            tmp.add(tablePage[j].equals(value));
+          }
+        }
       }
       bitmap.add(tmp);
-    }
-    ArrayList<Boolean> page = bitmap.get(pageIndex);
-    for (int i = 0; i < page.size(); i++) {
-      page.remove(i);
-      page.add(i, tablePage[i].equals(value));
     }
   }
 
@@ -39,9 +43,9 @@ public class Bitmap<T extends Comparable<T>> implements Comparable<Bitmap<T>>, S
   }
 
   boolean isEmpty() {
-    for(ArrayList<Boolean> map : bitmap) {
-      for(Boolean bit : map) {
-        if(bit){
+    for (ArrayList<Boolean> map : bitmap) {
+      for (Boolean bit : map) {
+        if (bit) {
           return false;
         }
       }

@@ -46,6 +46,7 @@ public class Index<T extends Comparable<T>> implements Serializable {
         sizes = firstPage.getShape();
       }
     }
+    sizes[pageNumber] = values.length;
     // Create new map based on the current page value
     Bitmap<T> newBitmap = new Bitmap<>(obj, pageNumber, values, sizes);
     // Loop through the pages and add the new map
@@ -76,24 +77,24 @@ public class Index<T extends Comparable<T>> implements Serializable {
     }
   }
 
-  void updatePage(int pageNumber, T[] toBitMap) throws DBAppException {
-    HashSet<T> uniqueValues = new HashSet<>(Arrays.asList(toBitMap));
+  void updatePage(int pageNumber, T[] values) throws DBAppException {
+    HashSet<T> uniqueValues = new HashSet<>(Arrays.asList(values));
     for (int i=0; i<pages.size(); i++) {
       String pageName = pages.get(i);
       IndexPage<T> loadedPage = IndexPage.loadPage(new File(pageName));
-      for (T obj : toBitMap) {
+      loadedPage.updatePage(pageNumber, values);
+      for (T obj : values) {
         if (loadedPage.contains(obj)) {
           uniqueValues.remove(obj);
         }
       }
-      loadedPage.updatePage(pageNumber, toBitMap);
       if(loadedPage.isEmpty()) {
         pages.remove(i--);
       }
     }
     // Add new values
     for (T newValue : uniqueValues) {
-      insertNewValue(newValue, toBitMap, pageNumber);
+      insertNewValue(newValue, values, pageNumber);
     }
   }
 

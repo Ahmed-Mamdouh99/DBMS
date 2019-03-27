@@ -11,25 +11,78 @@ public class Table implements Serializable {
 
 
   Iterator select(SQLTerm[] terms, String[] operators) throws DBAppException {
-    // Checking if the query is a select all query
-    if (terms.length == 1 && operators.length == 0 && terms[0]._strColumnName == null) {
-      HashSet<Hashtable<String, Comparable>> bag = new HashSet<>();
-      for (String pageName : pages) {
-        TablePage loadedPage = TablePage.loadPage(new File(pageName));
-        bag.addAll(loadedPage.getAll());
+    // Check if there are eny indices that can be used
+    for (SQLTerm term : terms) {
+      if (indices.containsKey(term._strColumnName)) {
+        boolean[][] locations = indices.get(term._strColumnName).query(term);
+        for (boolean[] arr : locations) {
+          for (int i = 0; i < arr.length; i++) {
+            arr[i] = true;
+          }
+        }
+        return selectOptimized(terms, operators, locations);
       }
-      return bag.iterator();
     }
-    // Validating terms
-    if (SQLTerm.validateQuery(terms, operators)) {
-      throw new DBAppException("Failed to validate query");
+    return selectFromPages(terms, operators, null);
+  }
+
+  private Iterator selectOptimized(SQLTerm[] terms, String[] operators, boolean[][] fullMap) throws DBAppException {
+    boolean[][] locations = new boolean[fullMap.length][];
+    for (int i = 0; i < locations.length; i++) {
+      locations[i] = new boolean[fullMap[i].length];
+      for (int j = 0; j < locations[i].length; j++) {
+        locations[i][j] = true;
+      }
     }
+    boolean[][] currentMap = null;
+    // Reduce possible search pages using the indices
+    for (int i = 0; i < terms.length; i++) {
+      // Check if the term has a bitmap
+      SQLTerm term = terms[i];
+      if (indices.containsKey(term._strColumnName)) {
+        // And the possible locations bitmap with the bitmap from querying the index
+        Index index = indices.get(term._strColumnName);
+        //possibleLocations = possibleLocations, index.query(term);
+        boolean[][] res = index.query(term);
+        if (currentMap == null) {
+          currentMap = res;
+        } else {
+          String operator = operators[i - 1];
+          if ("AND".equals(operator)) {
+            if (locations == null) {
+              locations = currentMap;
+            } else {
+              locations = mergeMaps(currentMap, res, operator);
+            }
+            currentMap = null;
+          } else {
+            currentMap = mergeMaps(currentMap, res, operator);
+          }
+        }
+      } else if (i > 0) {
+        String operator = operators[i - 1];
+        if (operator.equals("OR")) {
+          currentMap = fullMap;
+        } else if (operator.equals("XOR")) {
+          for (boolean[] arr : currentMap) {
+            for (int j = 0; j < arr.length; j++) {
+              arr[j] = !arr[j];
+            }
+          }
+        }
+      }
+    }
+    // Iterate over table pages and get result set
+    return selectFromPages(terms, operators, locations);
+  }
+
+  private Iterator selectFromPages(SQLTerm[] terms, String[] operators, boolean[][] locations) throws DBAppException {
     // Initialize result sets
     HashSet<Hashtable<String, Comparable>> bag0 = null;
-    HashSet<Hashtable<String, Comparable>> bag1 = executeQuery(terms[0]);
+    HashSet<Hashtable<String, Comparable>> bag1 = executeQuery(terms[0], locations);
     for (int index = 1; index < terms.length; index++) {
       // Get the second bag
-      HashSet<Hashtable<String, Comparable>> tmp = executeQuery(terms[index]);
+      HashSet<Hashtable<String, Comparable>> tmp = executeQuery(terms[index], locations);
       // Merge bags into bag2
       String operator = operators[index - 1];
       switch (operator) {
@@ -93,7 +146,7 @@ public class Table implements Serializable {
     for (int pageNumber = 0; pageNumber < pages.size(); pageNumber++) {
       String fileName = pages.get(pageNumber);
       TablePage loadedPage = TablePage.loadPage(new File(fileName));
-      Comparable[] bitmap = loadedPage.toBitMap(colName);
+      Comparable[] bitmap = loadedPage.getValues(colName);
       newIndex.insertPage(bitmap, pageNumber);
     }
     indices.put(colName, newIndex);
@@ -176,7 +229,7 @@ public class Table implements Serializable {
       File pageFile = new File(pages.get(pageNum));
       TablePage page = TablePage.loadPage(pageFile);
       record = page.insert(record, keyColumn);
-      if(page.isChanged()) {
+      if (page.isChanged()) {
         // Update indices and write page to disk
         updateIndices(pageNum, page);
         page.writeToDisk();
@@ -234,7 +287,7 @@ public class Table implements Serializable {
   }
 
   private int writePageToDisk(int pageNum, TablePage page) throws DBAppException {
-    if(page.isChanged()) {
+    if (page.isChanged()) {
       // Check if the page is empty
       page.writeToDisk();
       if (page.isEmpty()) {
@@ -248,22 +301,13 @@ public class Table implements Serializable {
     return pageNum;
   }
 
-  boolean containsColumn(String colName) {
-    return columns.containsKey(colName);
-  }
-
-  Column getColumn(String colName) {
-    return columns.get(colName);
-  }
-
-
   // private instance methods
   private void updateIndices(int pageNumber, TablePage page) throws DBAppException {
     for (Column column : columns.values()) {
       if (column.isIndexed()) {
         // Get the index for that specific column
         Index index = indices.get(column.getName());
-        index.updatePage(pageNumber, page.toBitMap(column.getName()));
+        index.updatePage(pageNumber, page.getValues(column.getName()));
       }
     }
   }
@@ -283,7 +327,7 @@ public class Table implements Serializable {
       if (column.isIndexed()) {
         // Get the index for that specific column
         Index index = indices.get(column.getName());
-        index.insertPage(newPage.toBitMap(column.getName()), pageNumber);
+        index.insertPage(newPage.getValues(column.getName()), pageNumber);
       }
     }
   }
@@ -331,49 +375,31 @@ public class Table implements Serializable {
     return union;
   }
 
-  private HashSet<Hashtable<String, Comparable>> executeQuery(SQLTerm term) throws DBAppException {
-    // Check if an index exists
-    HashSet<Hashtable<String, Comparable>> bag = new HashSet<>();
-    if (indices.containsKey(term._strColumnName)) {
-      // Get the bitmap from the index
-      boolean[][] bitmap = indices.get(term._strColumnName).query(term);
-      // Loop over the table pages and get the values from the result set
-      for (int pageNumber = 0; pageNumber < bitmap.length; pageNumber++) {
-        boolean[] oneDMap = bitmap[pageNumber];
-        // Check if there are any results in the current page
-        boolean isEmpty = true;
-        for (boolean bit : oneDMap) {
-          if (bit) {
-            isEmpty = false;
+  private HashSet<Hashtable<String, Comparable>> executeQuery(SQLTerm term, boolean[][] locations) throws DBAppException {
+    // Loop over pages
+    HashSet<Hashtable<String, Comparable>> output = new HashSet<>();
+    for (int i = 0; i < pages.size(); i++) {
+      // Check if the page contains possible answers
+      if(locations != null) {
+        boolean exists = false;
+        for(boolean bit : locations[i]) {
+          if(bit){
+            exists = true;
             break;
           }
         }
-        if (isEmpty) {
-          // Skip page if empty
+        if(!exists) {
           continue;
         }
-        // Load page
-        File pageFile = new File(pages.get(pageNumber));
-        TablePage loadedPage = TablePage.loadPage(pageFile);
-        // Iterate over values in the map and add matches to the bag
-        for (int index = 0; index < oneDMap.length; index++) {
-          if (oneDMap[index]) {
-            bag.add(loadedPage.get(index));
-          }
-        }
       }
-      return bag;
-    }
-    // Linear probing
-    return probe(term);
-  }
-
-  private HashSet<Hashtable<String, Comparable>> probe(SQLTerm term) throws DBAppException {
-    // Loop over pages
-    HashSet<Hashtable<String, Comparable>> output = new HashSet<>();
-    for (String fileName : pages) {
+      String fileName = pages.get(i);
       TablePage loadedPage = TablePage.loadPage(new File(fileName));
-      HashSet<Hashtable<String, Comparable>> set = loadedPage.getAll();
+      HashSet<Hashtable<String, Comparable>> set;
+      if(locations == null){
+        set = loadedPage.getAll();
+      } else {
+        set = loadedPage.getAll(locations[i]);
+      }
       for (Hashtable<String, Comparable> record : set) {
         switch (term._strOperator) {
           case "=":
@@ -408,6 +434,26 @@ public class Table implements Serializable {
             break;
           default:
             throw new DBAppException("Invalid term operator: " + term._strOperator);
+        }
+      }
+    }
+    return output;
+  }
+
+  private boolean[][] mergeMaps(boolean[][] map1, boolean[][] map2, String operator) {
+    boolean[][] output = new boolean[map1.length][];
+    for (int i = 0; i < output.length; i++) {
+      output[i] = new boolean[map1[i].length];
+      for (int j = 0; j < output[i].length; j++) {
+        switch (operator) {
+          case ("OR"):
+            output[i][j] = map1[i][j] | map2[i][j];
+            break;
+          case ("XOR"):
+            output[i][j] = map1[i][j] ^ map2[i][j];
+            break;
+          default:
+            output[i][j] = map1[i][j] & map2[i][j];
         }
       }
     }

@@ -16,6 +16,61 @@ class MetaData {
     return meta.tableMeta.containsKey(tableName);
   }
 
+  public static void validateQuery(SQLTerm[] terms, String[] operators) throws DBAppException {
+    if (meta == null) {
+      loadMetaData();
+    }
+    if (terms.length == 0 || operators.length != terms.length - 1) {
+      throw new DBAppException("Could not validate query: Length of terms and operators invalid");
+    }
+    String tableName = terms[0]._strTableName;
+    if (!meta.tableMeta.containsKey(tableName)) {
+      throw new DBAppException("The table: " + tableName + " Does not exist");
+    }
+    HashSet<Column> columns = meta.tableMeta.get(tableName);
+    for (SQLTerm term : terms) {
+      if (!term._strTableName.equals(tableName)) {
+        throw new DBAppException("Inconsistent table names in query");
+      }
+      Column column = null;
+      for (Column c : columns) {
+        if (c.getName().equals(term._strColumnName)) {
+          column = c;
+          break;
+        }
+      }
+      if (column == null) {
+        throw new DBAppException("Column: " + term._strColumnName + " Does not exist in the queried table");
+      }
+      try {
+        Class.forName(column.getType()).cast(term._objValue);
+      } catch (ClassNotFoundException e) {
+        throw new DBAppException("The value is not consistent with the column data type");
+      }
+      switch (term._strOperator) {
+        case ("="):
+        case ("!="):
+        case ("<"):
+        case ("<="):
+        case (">"):
+        case (">="):
+          break;
+        default:
+          throw new DBAppException("Invalid term operator");
+      }
+    }
+    for (String operator : operators) {
+      switch (operator) {
+        case ("AND"):
+        case ("OR"):
+        case ("XOR"):
+          break;
+        default:
+          throw new DBAppException("Invalid query operator");
+      }
+    }
+  }
+
   private void writeToDisk() throws DBAppException {
     if (meta == null) {
       return;
@@ -65,7 +120,7 @@ class MetaData {
       }
     }
     // Check if the columns have a touch date column
-    if(colData.containsKey("TouchDate")) {
+    if (colData.containsKey("TouchDate")) {
       throw new DBAppException("Cannot create a column called TouchDate");
     }
     Table newTable = new Table(tableName, key, colData);
@@ -96,7 +151,7 @@ class MetaData {
         String col = bf.readLine();
         Column loadedColumn = new Column(col);
         String tableName = loadedColumn.getTableName();
-        if(!meta.tableMeta.containsKey(tableName)) {
+        if (!meta.tableMeta.containsKey(tableName)) {
           meta.tableMeta.put(tableName, new HashSet<>());
         }
         meta.tableMeta.get(tableName).add(loadedColumn);
@@ -151,11 +206,11 @@ class MetaData {
   }
 
   private static Hashtable<String, String> getColumnData(String tableName) throws DBAppException {
-    if(meta == null) {
+    if (meta == null) {
       loadMetaData();
     }
     Hashtable<String, String> out = new Hashtable<>();
-    for(Column col : meta.tableMeta.get(tableName)) {
+    for (Column col : meta.tableMeta.get(tableName)) {
       out.put(col.getName(), col.getType());
     }
     return out;
