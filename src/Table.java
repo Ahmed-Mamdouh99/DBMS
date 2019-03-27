@@ -25,7 +25,6 @@ public class Table implements Serializable {
       throw new DBAppException("Failed to validate query");
     }
     // Initialize result sets
-
     HashSet<Hashtable<String, Comparable>> bag0 = null;
     HashSet<Hashtable<String, Comparable>> bag1 = executeQuery(terms[0]);
     for (int index = 1; index < terms.length; index++) {
@@ -41,15 +40,16 @@ public class Table implements Serializable {
           bag1 = xorBags(bag1, tmp);
           break;
         case ("AND"):
-          if(bag0 == null){
-            bag0 = bag1; break;
+          if (bag0 == null) {
+            bag0 = bag1;
+            break;
           }
           bag0 = andBags(bag0, bag1);
           bag1 = tmp;
           break;
       }
     }
-    if(bag0 == null){
+    if (bag0 == null) {
       return bag1.iterator();
     }
     return andBags(bag0, bag1).iterator();
@@ -70,14 +70,6 @@ public class Table implements Serializable {
     }
     // Get the column type
     String dataType = columns.get(colName).getType();
-    createIndex(colName, dataType, indexDirectoryPath);
-    // Mark column as indexed
-    columns.get(colName).setIndexed(true);
-    writeToDisk();
-  }
-
-  private void createIndex(String colName, String dataType, String indexDirectoryPath) throws DBAppException {
-    //Index<Integer> newIndex = new Index<>(colName, indexDirectoryPath);
     Index newIndex;
     switch (dataType) {
       case ("java.lang.String"):
@@ -105,6 +97,9 @@ public class Table implements Serializable {
       newIndex.insertPage(bitmap, pageNumber);
     }
     indices.put(colName, newIndex);
+    // Mark column as indexed
+    columns.get(colName).setIndexed(true);
+    writeToDisk();
   }
 
   Table(String tableName, String keyColumn, Hashtable<String, String> colNameType) throws DBAppException {
@@ -142,12 +137,12 @@ public class Table implements Serializable {
   static Table loadTable(String tableName, String path, HashSet<Column> cols) throws DBAppException {
     try {
       // Read the table from disk
-      ObjectInputStream reader = new ObjectInputStream(new FileInputStream(path+tableName));
+      ObjectInputStream reader = new ObjectInputStream(new FileInputStream(path + tableName));
       Table loadedTable = (Table) reader.readObject();
       reader.close();
       // Add columns
       loadedTable.columns = new Hashtable<>();
-      for(Column c : cols) {
+      for (Column c : cols) {
         loadedTable.columns.put(c.getName(), c);
       }
       // Add path
@@ -181,8 +176,11 @@ public class Table implements Serializable {
       File pageFile = new File(pages.get(pageNum));
       TablePage page = TablePage.loadPage(pageFile);
       record = page.insert(record, keyColumn);
-      // Update the indices if there are any
-      updateIndices(pageNum, page);
+      if(page.isChanged()) {
+        // Update indices and write page to disk
+        updateIndices(pageNum, page);
+        page.writeToDisk();
+      }
       if (record == null) {
         break;
       }
@@ -196,88 +194,58 @@ public class Table implements Serializable {
       newPage.insert(record, keyColumn);
       // Add the new fileName to the pages list
       pages.add(fileName);
+      newPage.writeToDisk();
       // Adding page to index
       insertToIndices(newPage, pages.size() - 1);
     }
     writeToDisk();
   }
 
-  void update(String keyCol, Hashtable<String, Object> mask) throws DBAppException{
+  void update(String keyCol, Hashtable<String, Object> mask) throws DBAppException {
     Hashtable<String, Comparable> record = copyHashtable(mask);
     HashSet<Hashtable<String, Object>> overflow = new HashSet<>();
     // Loop over pages
-    for(int i=0; i<pages.size(); i++) {
+    for (int i = 0; i < pages.size(); i++) {
       File pageFile = new File(pages.get(i));
       TablePage loadedPage = TablePage.loadPage(pageFile);
       // Update records in page and get overflow unsorted records
       overflow.addAll(loadedPage.update(record, keyCol, this.keyColumn));
-      if(loadedPage.isEmpty()) {
-        // Delete empty page
-        pages.remove(i);
-        removeFromIndices(i--);
-        continue;
-      }
-      // Update indices
-      updateIndices(i, loadedPage);
+      // Check if the page changed
+      i = writePageToDisk(i, loadedPage);
     }
     // Add overflow records
-    for(Hashtable<String, Object> row : overflow) {
+    for (Hashtable<String, Object> row : overflow) {
       insert(row);
     }
     writeToDisk();
   }
 
-//  int update(String keyCol, Hashtable<String, Object> mask) throws DBAppException {
-//    Hashtable<String, Comparable> record = copyHashtable(mask);
-//    int changedRecords = 0;
-//    // Get all records that fit the mask
-//    // Creating the query
-//    SQLTerm term = new SQLTerm();
-//    term._strColumnName = keyCol;
-//    term._strOperator = "=";
-//    term._objValue = mask.get(keyCol);
-//    Iterator<Hashtable<String, Object>> results = select(new SQLTerm[]{term}, new String[0]);
-//    // Iterate through the result set
-//    while (results.hasNext()) {
-//      changedRecords++;
-//      // Fetch a record and update its values
-//      Hashtable<String, Object> recordToUpdate = results.next();
-//      // Remove touch date
-//      recordToUpdate.remove("TouchDate");
-//      // Remove the record from the table
-//      delete(recordToUpdate);
-//      // Update record values
-//      for (String colName : record.keySet()) {
-//        recordToUpdate.put(colName, record.get(colName));
-//      }
-//      // Insert the record back into the table
-//      insert(recordToUpdate);
-//    }
-//    writeToDisk();
-//    return changedRecords;
-//  }
-
-  int delete(Hashtable<String, Object> mask) throws DBAppException {
+  void delete(Hashtable<String, Object> mask) throws DBAppException {
     // Copy the record
     Hashtable<String, Comparable> record = copyHashtable(mask);
-    int deletedRecords = 0;
     // Looping through the pages
     for (int pageNum = 0; pageNum < pages.size(); pageNum++) {
       File pageFile = new File(pages.get(pageNum));
       TablePage page = TablePage.loadPage(pageFile);
-      int deleted = page.delete(record);
-      deletedRecords += deleted;
+      page.delete(record);
+      pageNum = writePageToDisk(pageNum, page);
+    }
+    writeToDisk();
+  }
+
+  private int writePageToDisk(int pageNum, TablePage page) throws DBAppException {
+    if(page.isChanged()) {
       // Check if the page is empty
+      page.writeToDisk();
       if (page.isEmpty()) {
         // Remove the page and move back the pointer
         pages.remove(pageNum);
         removeFromIndices(pageNum--);
-        continue;
+        return pageNum;
       }
       updateIndices(pageNum, page);
     }
-    writeToDisk();
-    return deletedRecords;
+    return pageNum;
   }
 
   boolean containsColumn(String colName) {
