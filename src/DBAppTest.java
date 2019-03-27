@@ -12,54 +12,61 @@ public class DBAppTest {
   private static final PrintWriter pw = new PrintWriter(System.out);
 
   public static void main(String[] args) {
-    // Clear data directory
-    File dataFile = new File("data/");
-    if (dataFile.exists() && !deleteDirectories(dataFile)) {
-      System.err.println("Could not clear data directory");
-      return;
-    }
-    // Run tests
-    test();
-    // flush writer
-    pw.flush();
-    pw.close();
-  }
-
-  private static void test() {
     DBApp app = null;
     try {
       app = new DBApp();
     } catch (DBAppException e) {
       e.printStackTrace();
     }
+    test(app, true);
+    test(app, false);
+    // flush writer
+    pw.flush();
+    pw.close();
+  }
+
+  private static void test(DBApp app, boolean b) {
+    int tableNumber;
+    if(b){
+      // Clear data directory
+      File dataFile = new File("data/");
+      if (dataFile.exists() && !deleteDirectories(dataFile)) {
+        System.err.println("Could not clear data directory");
+        return;
+      }
+      tableNumber = testTableCreation(app, 1);
+    } else {
+      tableNumber = 0;
+    }
     // Test table creation
-    int tableNumber = testTableCreation(app, 1);
     if (tableNumber == -1) {
       // end testing
       return;
     }
     String tableName = "Table" + tableNumber;
     // Test insertion without indices
-    testInsertion(app, tableName, tableNumber, 2);
+    if(b) {
+      testInsertion(app, tableName, tableNumber, 10);
+    }
     // Test index creation
-    testIndexCreation(app, tableName, tableNumber);
+    if(b){
+      testIndexCreation(app, tableName, tableNumber);
+    }
     // Test insertion with indices
     testInsertion(app, tableName, tableNumber, 6);
     // Test selection
-    testSelection(app, tableName, tableNumber);
-    // Test deletion
-    testDeletion(app, tableName, tableNumber);
-    // Test selection to make sure all true records were deleted
-    testSelection(app, tableName, tableNumber);
+    testSelection(app, tableName, tableNumber, false);
     // Test update
-    testUpdate(app, tableName, tableNumber);
-    // Checking if all records did change
-    selectAll(app, tableName);
+    testUpdate(app, tableName, tableNumber, true);
+    // Test deletion
+    testDeletion(app, tableName, tableNumber, true);
+    testDeletion(app, tableName, tableNumber, false);
+
   }
 
-  private static void testUpdate(DBApp app, String tableName, int tableNumber) {
+  private static void testUpdate(DBApp app, String tableName, int tableNumber, boolean value) {
     Hashtable<String, Object> mask = new Hashtable<>();
-    mask.put(types[3] + tableNumber, false);
+    mask.put(types[3] + tableNumber, value);
     mask.put(types[1] + tableNumber, -1);
     try {
       app.updateTable(tableName, types[3] + tableNumber, mask);
@@ -68,6 +75,7 @@ public class DBAppTest {
       return;
     }
     pw.println("Updated records successfully.");
+    testSelection(app, tableName, tableNumber, value);
   }
 
   private static int testTableCreation(DBApp app, int numberOfTables) {
@@ -126,9 +134,9 @@ public class DBAppTest {
     pw.printf("Created %d/%d indices.\n", i, types.length);
   }
 
-  private static void testSelection(DBApp app, String tableName, int tableNumber) {
+  private static void testSelection(DBApp app, String tableName, int tableNumber, boolean value) {
     SQLTerm term = new SQLTerm();
-    term._objValue = true;
+    term._objValue = value;
     term._strOperator = "=";
     term._strColumnName = types[3] + tableNumber;
     term._strTableName = tableName;
@@ -143,29 +151,17 @@ public class DBAppTest {
     pw.printf("Selection succeeded with %d matches.\n", resultSize);
   }
 
-  private static void testDeletion(DBApp app, String tableName, int tableNumber) {
+  private static void testDeletion(DBApp app, String tableName, int tableNumber, boolean value) {
     // Deleting all true values from the table
     Hashtable<String, Object> record = new Hashtable<>();
-    record.put(types[3] + tableNumber, true);
+    record.put(types[3] + tableNumber, value);
     try {
       app.deleteFromTable(tableName, record);
     } catch (DBAppException e) {
       e.printStackTrace();
     }
     pw.println("Deleted records successfully.");
-  }
-
-
-  // private helpers
-  private static void selectAll(DBApp app, String tableName) {
-    try {
-      SQLTerm term = new SQLTerm();
-      term._strTableName = tableName;
-      Iterator<Hashtable<String, Object>> result = app.selectFromTable(new SQLTerm[]{term}, new String[0]);
-      printResults(result);
-    } catch (DBAppException e) {
-      e.printStackTrace();
-    }
+    testSelection(app, tableName, tableNumber, value);
   }
 
   private static Comparable<?>[] genRecord() {

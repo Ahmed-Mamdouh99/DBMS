@@ -51,7 +51,7 @@ class IndexPage<T extends Comparable<T>> implements Serializable {
       return loadedPage;
     } catch (IOException | ClassNotFoundException e) {
       if (!temp.delete()) {
-        System.err.println("First");
+
         throw new DBAppException("Could not delete temp file");
       }
 

@@ -55,7 +55,7 @@ class TablePage implements Serializable {
     changed = false;
   }
 
-  Hashtable<String, Comparable> insert(Hashtable<String, Comparable> newRecord, String key) throws DBAppException {
+  Hashtable<String, Comparable> insert(Hashtable<String, Comparable> newRecord, String key) {
     int index = 0;
     Comparable keyValue = newRecord.get(key);
     changed = true;
@@ -67,7 +67,7 @@ class TablePage implements Serializable {
         if (records.size() == maxSize) {
           // Switch the current record with the record at the index
           records.add(index, newRecord);
-          return records.remove(records.size()-1);
+          return records.remove(records.size() - 1);
         } else {
           records.add(index, newRecord);
           return null;
@@ -85,7 +85,7 @@ class TablePage implements Serializable {
     return newRecord;
   }
 
-  void delete(Hashtable<String, Comparable> mask) throws DBAppException {
+  void delete(Hashtable<String, Comparable> mask) {
     for (int i = 0; i < records.size(); i++) {
       Hashtable<String, Comparable> currentRecord = records.get(i);
       // Check if the record matches the mask
@@ -109,7 +109,7 @@ class TablePage implements Serializable {
   }
 
   // Bitmap methods
-  Comparable[] toBitMap(String colName) {
+  Comparable[] getValues(String colName) {
     Comparable[] map = new Comparable[records.size()];
     for (int i = 0; i < map.length; i++) {
       map[i] = records.get(i).get(colName);
@@ -149,7 +149,17 @@ class TablePage implements Serializable {
     return new HashSet<>(records);
   }
 
-  List<Hashtable<String, Object>> update(Hashtable<String, Comparable> mask, String keyCol, String tableKeyColumn) throws DBAppException {
+  HashSet<Hashtable<String, Comparable>> getAll(boolean[] map) {
+    HashSet<Hashtable<String, Comparable>> output = new HashSet<>();
+    for (int i = 0; i < map.length; i++) {
+      if(map[i]) {
+        output.add(records.get(i));
+      }
+    }
+    return output;
+  }
+
+  List<Hashtable<String, Object>> update(Hashtable<String, Comparable> mask, String keyCol, String tableKeyColumn) {
     List<Hashtable<String, Object>> output = new ArrayList<>();
     // Check if updated records should be re-inserted for sorting
     boolean removeMatches = !keyCol.equals(tableKeyColumn);

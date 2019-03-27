@@ -81,6 +81,7 @@ public class DBApp {
       throw new DBAppException("The table " + tableName + " does not exist.");
     }
     Table table = MetaData.getTable(tableName);
+    MetaData.validateQuery(terms, operators);
     return table.select(terms, operators);
   }
 }
