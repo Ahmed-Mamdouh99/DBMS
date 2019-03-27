@@ -23,50 +23,23 @@ public class DBApp {
   }
 
   public void insertIntoTable(String tableName, Hashtable<String, Object> record) throws DBAppException {
-    // Check if the table exists
-    if (!MetaData.containsTable(tableName)) {
-      throw new DBAppException("The table " + tableName + " does not exist.");
-    }
-    // Validate record
-    if(!MetaData.validateRecord(tableName, record)){
-      throw new DBAppException("Row data invalid.");
-    }
     // Get the table instance from the metaData
-    Table table = MetaData.getTable(tableName);
+    Table table = getTableFromMeta(tableName, record);
     // Adding the record to the table
     table.insert(record);
   }
 
   public void updateTable(String tableName, String keyCol, Hashtable<String, Object> record) throws DBAppException {
-    // Check if the table exists
-    if (!MetaData.containsTable(tableName)) {
-      throw new DBAppException("The table " + tableName + " does not exist.");
-    }
-    //noinspection Duplicates
-    // Validate record
-    if(!MetaData.validateMask(tableName, record)){
-      throw new DBAppException("Row data invalid.");
-    }
     // Get table from meta
-    Table table = MetaData.getTable(tableName);
+    Table table = getTableFromMeta(tableName, record);
     table.update(keyCol, record);
-    //System.out.printf("Updated %d records.\n", table.update(keyCol, record));
   }
 
   public void deleteFromTable(String tableName, Hashtable<String, Object> mask) throws DBAppException {
-    // Check if the table exists
-    if (!MetaData.containsTable(tableName)) {
-      throw new DBAppException("The table " + tableName + " does not exist.");
-    }
-    // Validate record
-    if(!MetaData.validateMask(tableName, mask)){
-      throw new DBAppException("Row data invalid.");
-    }
     // Get table from meta
     Table table = MetaData.getTable(tableName);
     // Create a comparable hashtable
     table.delete(mask);
-    //System.out.printf("Deleted %d records.\n", table.delete(mask));
   }
 
   public void createBitmapIndex(String tableName, String colName) throws DBAppException {
@@ -83,5 +56,17 @@ public class DBApp {
     Table table = MetaData.getTable(tableName);
     MetaData.validateQuery(terms, operators);
     return table.select(terms, operators);
+  }
+
+  private Table getTableFromMeta(String tableName, Hashtable<String, Object> record) throws DBAppException {
+    // Check if the table exists
+    if (!MetaData.containsTable(tableName)) {
+      throw new DBAppException("The table " + tableName + " does not exist.");
+    }
+    // Validate record
+    if(!MetaData.validateMask(tableName, record)){
+      throw new DBAppException("Row data invalid.");
+    }
+    return MetaData.getTable(tableName);
   }
 }

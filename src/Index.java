@@ -9,14 +9,18 @@ public class Index<T extends Comparable<T>> implements Serializable {
   private String colName;
   private ArrayList<String> pages;
   private String path;
+  private ArrayList<Integer> sizes;
 
   Index(String colName, String path) {
     this.colName = colName;
     this.path = path;
     pages = new ArrayList<>();
+    sizes = new ArrayList<>();
   }
 
   void insertPage(T[] values, int pageNumber) throws DBAppException {
+    // Update page sizes
+    sizes.add(pageNumber, values.length);
     // Save values into a set
     HashSet<T> set = new HashSet<>(Arrays.asList(values));
     // Add
@@ -33,22 +37,12 @@ public class Index<T extends Comparable<T>> implements Serializable {
   }
 
   private void insertNewValue(T obj, T[] values, int pageNumber) throws DBAppException {
-    // check if there are existing records
-    int[] sizes;
-    if (pages.isEmpty()) {
-      sizes = new int[]{values.length};
-    } else {
-      // Load the first page and get the size from it
-      IndexPage firstPage = IndexPage.loadPage(new File(pages.get(0)));
-      if (firstPage.peek() == null) {
-        sizes = new int[]{values.length};
-      } else {
-        sizes = firstPage.getShape();
-      }
-    }
-    sizes[pageNumber] = values.length;
     // Create new map based on the current page value
-    Bitmap<T> newBitmap = new Bitmap<>(obj, pageNumber, values, sizes);
+    int[] sizesArr = new int[sizes.size()];
+    for(int i=0; i<sizes.size(); i++) {
+      sizesArr[i] = sizes.get(i);
+    }
+    Bitmap<T> newBitmap = new Bitmap<>(obj, pageNumber, values, sizesArr);
     // Loop through the pages and add the new map
     for (String fileName : pages) {
       IndexPage<T> loadedPage = IndexPage.loadPage(new File(fileName));
@@ -67,6 +61,8 @@ public class Index<T extends Comparable<T>> implements Serializable {
   }
 
   void deletePage(int pageNumber) throws DBAppException {
+    // Update page sizes
+    sizes.remove(pageNumber);
     for (int i = 0; i < pages.size(); i++) {
       String pageName = pages.get(i);
       IndexPage loadedPage = IndexPage.loadPage(new File(pageName));
@@ -78,6 +74,8 @@ public class Index<T extends Comparable<T>> implements Serializable {
   }
 
   void updatePage(int pageNumber, T[] values) throws DBAppException {
+    sizes.remove(pageNumber);
+    sizes.add(pageNumber, values.length);
     HashSet<T> uniqueValues = new HashSet<>(Arrays.asList(values));
     for (int i=0; i<pages.size(); i++) {
       String pageName = pages.get(i);

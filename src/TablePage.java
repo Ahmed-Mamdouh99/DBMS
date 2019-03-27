@@ -162,7 +162,8 @@ class TablePage implements Serializable {
   List<Hashtable<String, Object>> update(Hashtable<String, Comparable> mask, String keyCol, String tableKeyColumn) {
     List<Hashtable<String, Object>> output = new ArrayList<>();
     // Check if updated records should be re-inserted for sorting
-    boolean removeMatches = !keyCol.equals(tableKeyColumn);
+    boolean removeMatches = (!keyCol.equals(tableKeyColumn)) && mask.containsKey(tableKeyColumn);
+    if(removeMatches) System.out.println("HERE");
     // Loop over records
     for (int i = 0; i < records.size(); i++) {
       Hashtable<String, Comparable> row = records.get(i);
