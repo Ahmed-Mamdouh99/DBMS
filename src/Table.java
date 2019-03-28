@@ -11,22 +11,58 @@ public class Table implements Serializable {
 
 
   Iterator select(SQLTerm[] terms, String[] operators) throws DBAppException {
+    // Get possible placements
+    boolean[][] locations = getLocations(terms, operators);
+    // Initialize result sets
+    HashSet<Hashtable<String, Comparable>> bag0 = null;
+    HashSet<Hashtable<String, Comparable>> bag1 = executeQuery(terms[0], locations);
+    for (int index = 1; index < terms.length; index++) {
+      // Get the second bag
+      HashSet<Hashtable<String, Comparable>> tmp = executeQuery(terms[index], locations);
+      // Merge bags into bag2
+      String operator = operators[index - 1];
+      switch (operator) {
+        case ("OR"):
+          bag1 = orBags(bag1, tmp);
+          break;
+        case ("XOR"):
+          bag1 = xorBags(bag1, tmp);
+          break;
+        case ("AND"):
+          if (bag0 == null) {
+            bag0 = bag1;
+            break;
+          }
+          bag0 = andBags(bag0, bag1);
+          bag1 = tmp;
+          break;
+      }
+    }
+    if (bag0 == null) {
+      return bag1.iterator();
+    }
+    return andBags(bag0, bag1).iterator();
+  }
+
+  private boolean[][] getLocations(SQLTerm[] terms, String[] operators) throws DBAppException {
     // Check if there are eny indices that can be used
+    boolean[][] fullMap = null;
+    boolean indicesFound = false;
     for (SQLTerm term : terms) {
       if (indices.containsKey(term._strColumnName)) {
-        boolean[][] locations = indices.get(term._strColumnName).query(term);
-        for (boolean[] arr : locations) {
+        fullMap = indices.get(term._strColumnName).query(term);
+        for (boolean[] arr : fullMap) {
           for (int i = 0; i < arr.length; i++) {
             arr[i] = true;
           }
         }
-        return selectOptimized(terms, operators, locations);
+        indicesFound = true;
+        break;
       }
     }
-    return selectFromPages(terms, operators, null);
-  }
-
-  private Iterator selectOptimized(SQLTerm[] terms, String[] operators, boolean[][] fullMap) throws DBAppException {
+    if (!indicesFound) {
+      return null;
+    }
     boolean[][] locations = new boolean[fullMap.length][];
     for (int i = 0; i < locations.length; i++) {
       locations[i] = new boolean[fullMap[i].length];
@@ -63,7 +99,7 @@ public class Table implements Serializable {
         String operator = operators[i - 1];
         if (operator.equals("OR")) {
           currentMap = fullMap;
-        } else if (operator.equals("XOR")) {
+        } else if (operator.equals("XOR") && currentMap != null) {
           for (boolean[] arr : currentMap) {
             for (int j = 0; j < arr.length; j++) {
               arr[j] = !arr[j];
@@ -72,40 +108,8 @@ public class Table implements Serializable {
         }
       }
     }
-    // Iterate over table pages and get result set
-    return selectFromPages(terms, operators, locations);
-  }
-
-  private Iterator selectFromPages(SQLTerm[] terms, String[] operators, boolean[][] locations) throws DBAppException {
-    // Initialize result sets
-    HashSet<Hashtable<String, Comparable>> bag0 = null;
-    HashSet<Hashtable<String, Comparable>> bag1 = executeQuery(terms[0], locations);
-    for (int index = 1; index < terms.length; index++) {
-      // Get the second bag
-      HashSet<Hashtable<String, Comparable>> tmp = executeQuery(terms[index], locations);
-      // Merge bags into bag2
-      String operator = operators[index - 1];
-      switch (operator) {
-        case ("OR"):
-          bag1 = orBags(bag1, tmp);
-          break;
-        case ("XOR"):
-          bag1 = xorBags(bag1, tmp);
-          break;
-        case ("AND"):
-          if (bag0 == null) {
-            bag0 = bag1;
-            break;
-          }
-          bag0 = andBags(bag0, bag1);
-          bag1 = tmp;
-          break;
-      }
-    }
-    if (bag0 == null) {
-      return bag1.iterator();
-    }
-    return andBags(bag0, bag1).iterator();
+    // Return bitmap of positive results
+    return locations;
   }
 
   void createBitmapIndex(String colName) throws DBAppException {
@@ -254,34 +258,57 @@ public class Table implements Serializable {
     writeToDisk();
   }
 
-  void update(String keyCol, Hashtable<String, Object> mask) throws DBAppException {
-    Hashtable<String, Comparable> record = copyHashtable(mask);
-    HashSet<Hashtable<String, Object>> overflow = new HashSet<>();
-    // Loop over pages
-    for (int i = 0; i < pages.size(); i++) {
-      File pageFile = new File(pages.get(i));
-      TablePage loadedPage = TablePage.loadPage(pageFile);
-      // Update records in page and get overflow unsorted records
-      overflow.addAll(loadedPage.update(record, keyCol, this.keyColumn));
-      // Check if the page changed
-      i = writePageToDisk(i, loadedPage);
-    }
-    // Add overflow records
-    for (Hashtable<String, Object> row : overflow) {
-      insert(row);
-    }
-    writeToDisk();
-  }
-
   void delete(Hashtable<String, Object> mask) throws DBAppException {
+    // Create a query to get possible placements of the records
+    boolean[][] locations = getLocationsFromMask(mask);
     // Copy the record
     Hashtable<String, Comparable> record = copyHashtable(mask);
     // Looping through the pages
     for (int pageNum = 0; pageNum < pages.size(); pageNum++) {
+      if (skipPage(locations, pageNum)) {
+        //continue;
+      }
       File pageFile = new File(pages.get(pageNum));
       TablePage page = TablePage.loadPage(pageFile);
       page.delete(record);
       pageNum = writePageToDisk(pageNum, page);
+    }
+    writeToDisk();
+  }
+
+  private boolean skipPage(boolean[][] locations, int pageNum) {
+    if (locations != null) {
+      for (boolean bit : locations[pageNum]) {
+        if (bit) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void update(String keyCol, Hashtable<String, Object> mask) throws DBAppException {
+    // Create a query to get possible placements of the records
+    Hashtable<String, Object> queryMask = new Hashtable<>();
+    queryMask.put(keyCol, mask.get(keyCol));
+    boolean[][] locations = getLocationsFromMask(queryMask);
+    Hashtable<String, Comparable> record = copyHashtable(mask);
+    HashSet<Hashtable<String, Object>> overflow = new HashSet<>();
+    // Loop over pages
+    for (int pageNum = 0; pageNum < pages.size(); pageNum++) {
+      if (skipPage(locations, pageNum)) {
+        //continue;
+      }
+      File pageFile = new File(pages.get(pageNum));
+      TablePage loadedPage = TablePage.loadPage(pageFile);
+      // Update records in page and get overflow unsorted records
+      overflow.addAll(loadedPage.update(record, keyCol, this.keyColumn));
+      // Check if the page changed
+      pageNum = writePageToDisk(pageNum, loadedPage);
+    }
+    // Add overflow records
+    for (Hashtable<String, Object> row : overflow) {
+      insert(row);
     }
     writeToDisk();
   }
@@ -380,22 +407,22 @@ public class Table implements Serializable {
     HashSet<Hashtable<String, Comparable>> output = new HashSet<>();
     for (int i = 0; i < pages.size(); i++) {
       // Check if the page contains possible answers
-      if(locations != null) {
+      if (locations != null) {
         boolean exists = false;
-        for(boolean bit : locations[i]) {
-          if(bit){
+        for (boolean bit : locations[i]) {
+          if (bit) {
             exists = true;
             break;
           }
         }
-        if(!exists) {
+        if (!exists) {
           continue;
         }
       }
       String fileName = pages.get(i);
       TablePage loadedPage = TablePage.loadPage(new File(fileName));
       HashSet<Hashtable<String, Comparable>> set;
-      if(locations == null){
+      if (locations == null) {
         set = loadedPage.getAll();
       } else {
         set = loadedPage.getAll(locations[i]);
@@ -467,5 +494,21 @@ public class Table implements Serializable {
 
   HashSet<Column> getColSet() {
     return new HashSet<>(columns.values());
+  }
+
+  private boolean[][] getLocationsFromMask(Hashtable<String, Object> mask) throws DBAppException {
+    SQLTerm[] terms = new SQLTerm[mask.size()];
+    String[] operators = new String[mask.size() - 1];
+    int index = 0;
+    for (String colName : mask.keySet()) {
+      SQLTerm term = terms[index++] = new SQLTerm();
+      term._strColumnName = colName;
+      term._objValue = mask.get(colName);
+      term._strOperator = "=";
+      if (index <= operators.length) {
+        operators[index - 1] = "AND";
+      }
+    }
+    return getLocations(terms, operators);
   }
 }
